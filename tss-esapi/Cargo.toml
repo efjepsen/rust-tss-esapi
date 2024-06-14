@@ -35,3 +35,4 @@ sha2 = "0.10.1"
 
 [features]
 generate-bindings = ["tss-esapi-sys/generate-bindings"]
+from-source = ["tss-esapi-sys/from-source"]

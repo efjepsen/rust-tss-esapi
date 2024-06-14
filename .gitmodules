@@ -1,0 +1,9 @@
+[submodule "openssl"]
+	path = openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "libtpms"]
+	path = libtpms
+	url = https://github.com/stefanberger/libtpms.git
+[submodule "tpm2-tss"]
+	path = tpm2-tss
+	url = git@github.com:efjepsen/tpm2-tss.git

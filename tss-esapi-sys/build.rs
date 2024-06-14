@@ -4,6 +4,11 @@
 #[cfg(feature = "generate-bindings")]
 use std::path::PathBuf;
 
+#[cfg(feature = "from-source")]
+use std::env::current_dir;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+
 const MINIMUM_VERSION: &str = "2.4.6";
 
 fn main() {
@@ -36,24 +41,92 @@ fn main() {
             }
         }
 
-        pkg_config::Config::new()
-            .atleast_version(MINIMUM_VERSION)
-            .probe("tss2-sys")
-            .expect("Failed to find tss2-sys library.");
-        let tss2_esys = pkg_config::Config::new()
-            .atleast_version(MINIMUM_VERSION)
-            .probe("tss2-esys")
-            .expect("Failed to find tss2-esys library.");
-        pkg_config::Config::new()
-            .atleast_version(MINIMUM_VERSION)
-            .probe("tss2-tctildr")
-            .expect("Failed to find tss2-tctildr library.");
-        pkg_config::Config::new()
-            .atleast_version(MINIMUM_VERSION)
-            .probe("tss2-mu")
-            .expect("Failed to find tss2-mu library.");
+        #[cfg(not(feature = "from-source"))]
+        {
+            pkg_config::Config::new()
+                .atleast_version(MINIMUM_VERSION)
+                .probe("tss2-sys")
+                .expect("Failed to find tss2-sys library.");
+            let tss2_esys = pkg_config::Config::new()
+                .atleast_version(MINIMUM_VERSION)
+                .probe("tss2-esys")
+                .expect("Failed to find tss2-esys library.");
+            pkg_config::Config::new()
+                .atleast_version(MINIMUM_VERSION)
+                .probe("tss2-tctildr")
+                .expect("Failed to find tss2-tctildr library.");
+            pkg_config::Config::new()
+                .atleast_version(MINIMUM_VERSION)
+                .probe("tss2-mu")
+                .expect("Failed to find tss2-mu library.");
 
-        println!("cargo:version={}", tss2_esys.version);
+            println!("cargo:version={}", tss2_esys.version);
+        }
+
+        #[cfg(feature = "from-source")]
+        {
+            // Make openssl
+            Command::new("sh")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .arg("-c")
+                .arg("\
+                  cd ../openssl \
+                  && ./Configure -static --prefix=$PWD/../sysroot --openssldir=$PWD/../sysroot linux-x86_64 no-dso no-shared \
+                  && make \
+                  && make install_sw \
+                ")
+                .output()
+                .expect("Failed to make openssl");
+
+            // Make libtpms
+            // TODO have to install autoconf, pkg-config, and libtool
+            Command::new("sh")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .arg("-c")
+                .arg("\
+                  cd ../libtpms \
+                  && autoreconf --verbose --force --install \
+                  && PKG_CONFIG_PATH=$PWD/../sysroot/lib/pkgconfig LDFLAGS=-L$PWD/../sysroot/lib CFLAGS=-I$PWD/../sysroot/include \
+                    ./configure --enable-static=yes --enable-shared=no \
+                    --prefix=$PWD/../sysroot --with-tpm2 --with-openssl \
+                  && make \
+                  && make install \
+                ")
+                .output()
+                .expect("Failed to make libtpms");
+
+            // Make tpm2-tss
+            // TODO have to install autoconf-archive
+            Command::new("sh")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .arg("-c")
+                .arg("\
+                  cd ../tpm2-tss \
+                  && ./bootstrap \
+                  && PKG_CONFIG_PATH=$PWD/../sysroot/lib/pkgconfig LDFLAGS=-L$PWD/../sysroot/lib CFLAGS=-I$PWD/../sysroot/include \
+                    ./configure --disable-tcti-device --disable-tcti-mssim --disable-tcti-swtpm \
+                    --disable-tcti-pcap --disable-tcti-cmd --disable-tcti-spi-helper \
+                    --enable-tcti-libtpms \
+                    --disable-shared --enable-static --enable-nodl \
+                    --disable-fapi --disable-policy \
+                    --prefix=/ \
+                  && make \
+                  && make DESTDIR=$PWD/../sysroot install \
+                ")
+                .output()
+                .expect("Failed to make tpm2-tss");
+
+            println!("cargo:rustc-link-search=native={}/../sysroot/lib", current_dir().unwrap().display());
+            println!("cargo:rustc-link-lib=static=tss2-esys");
+            println!("cargo:rustc-link-lib=static=tss2-sys");
+            println!("cargo:rustc-link-lib=static=tss2-tctildr");
+            println!("cargo:rustc-link-lib=static=tss2-mu");
+            println!("cargo:rustc-link-lib=static=crypto");
+            println!("cargo:rustc-link-lib=static=ssl");
+        }
     }
 }
 
